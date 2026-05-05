@@ -4,6 +4,8 @@ import ai.chronon.online.metrics.Metrics;
 import ai.chronon.online.metrics.OtelMetricsReporter;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.config.MeterFilter;
+import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.micrometer.registry.otlp.OtlpConfig;
@@ -72,13 +74,27 @@ public class ChrononServiceLauncher extends Launcher {
                     return exportInterval;
                 case "otlp.resourceAttributes":
                     return "service.name=" + serviceName;
+                // Emit exponential histograms so backends can compute server-side percentiles
+                case "otlp.histogramFlavor":
+                    return "BASE2_EXPONENTIAL";
                 default:
                     return null;
             }
         };
 
-        MeterRegistry registry = new OtlpMeterRegistry(otlpConfig, Clock.SYSTEM);
-        MicrometerMetricsFactory metricsFactory = new MicrometerMetricsFactory(registry);
+        OtlpMeterRegistry registry = new OtlpMeterRegistry(otlpConfig, Clock.SYSTEM);
+        // histogramFlavor only takes effect when publishPercentileHistogram is enabled on the meter
+        registry.config().meterFilter(new MeterFilter() {
+            @Override
+            public DistributionStatisticConfig configure(io.micrometer.core.instrument.Meter.Id id,
+                                                        DistributionStatisticConfig config) {
+                return DistributionStatisticConfig.builder()
+                        .percentilesHistogram(true)
+                        .build()
+                        .merge(config);
+            }
+        });
+        MicrometerMetricsFactory metricsFactory = new MicrometerMetricsFactory((MeterRegistry) registry);
 
         MicrometerMetricsOptions metricsOptions = new MicrometerMetricsOptions()
                 .setEnabled(true)
