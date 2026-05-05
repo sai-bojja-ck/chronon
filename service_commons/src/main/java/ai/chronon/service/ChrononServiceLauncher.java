@@ -64,6 +64,7 @@ public class ChrononServiceLauncher extends Launcher {
     private void configureOtlpHttpMetrics(String serviceName, VertxOptions options) {
         String exporterUrl = OtelMetricsReporter.getExporterUrl() + "/v1/metrics";
         String exportInterval = OtelMetricsReporter.getMetricsExporterInterval();
+        String resourceAttributes = buildOtlpResourceAttributes(serviceName);
 
         // Configure OTLP using Micrometer's built-in registry
         OtlpConfig otlpConfig = key -> {
@@ -73,7 +74,7 @@ public class ChrononServiceLauncher extends Launcher {
                 case "otlp.step":
                     return exportInterval;
                 case "otlp.resourceAttributes":
-                    return "service.name=" + serviceName;
+                    return resourceAttributes;
                 // Emit exponential histograms so backends can compute server-side percentiles
                 case "otlp.histogramFlavor":
                     return "BASE2_EXPONENTIAL";
@@ -124,6 +125,37 @@ public class ChrononServiceLauncher extends Launcher {
                 .addLabels(Label.HTTP_METHOD, Label.HTTP_CODE, Label.HTTP_PATH);
 
         options.setMetricsOptions(metricsOptions);
+    }
+
+    /**
+     * Build the comma-separated resource attributes string for the Vert.x/Micrometer OTLP registry.
+     *
+     * Unlike the OTel SDK, Micrometer's OtlpMeterRegistry does not auto-read OTEL_SERVICE_NAME or
+     * OTEL_RESOURCE_ATTRIBUTES, so we mirror that behavior here. We also honor the Chronon-specific
+     * system property used by OtelMetricsReporter so both metrics pipelines accept the same config.
+     *
+     * Precedence (later entries override earlier ones, since Micrometer parses into a LinkedHashMap
+     * where the last value for a given key wins):
+     *   1. service.name=&lt;default&gt;
+     *   2. OTEL_RESOURCE_ATTRIBUTES env var
+     *   3. ai.chronon.metrics.exporter.resources system property
+     *   4. OTEL_SERVICE_NAME env var (overrides service.name)
+     */
+    static String buildOtlpResourceAttributes(String defaultServiceName) {
+        StringBuilder sb = new StringBuilder("service.name=").append(defaultServiceName);
+        String envResourceAttrs = System.getenv("OTEL_RESOURCE_ATTRIBUTES");
+        if (envResourceAttrs != null && !envResourceAttrs.trim().isEmpty()) {
+            sb.append(',').append(envResourceAttrs.trim());
+        }
+        String chrononResourceAttrs = System.getProperty(OtelMetricsReporter.MetricsExporterResourceKey(), "");
+        if (!chrononResourceAttrs.trim().isEmpty()) {
+            sb.append(',').append(chrononResourceAttrs.trim());
+        }
+        String envServiceName = System.getenv("OTEL_SERVICE_NAME");
+        if (envServiceName != null && !envServiceName.trim().isEmpty()) {
+            sb.append(',').append("service.name=").append(envServiceName.trim());
+        }
+        return sb.toString();
     }
 
     public static void main(String[] args) {
