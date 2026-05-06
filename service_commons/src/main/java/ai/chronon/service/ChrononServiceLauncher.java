@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * Custom launcher to help configure the Chronon vertx feature service
@@ -142,8 +143,13 @@ public class ChrononServiceLauncher extends Launcher {
      *   4. OTEL_SERVICE_NAME env var (overrides service.name)
      */
     static String buildOtlpResourceAttributes(String defaultServiceName) {
+        return buildOtlpResourceAttributes(defaultServiceName, System::getenv);
+    }
+
+    // Overload that takes an env lookup function for testability — System.getenv is immutable in-process.
+    static String buildOtlpResourceAttributes(String defaultServiceName, Function<String, String> envLookup) {
         StringBuilder sb = new StringBuilder("service.name=").append(defaultServiceName);
-        String envResourceAttrs = System.getenv("OTEL_RESOURCE_ATTRIBUTES");
+        String envResourceAttrs = envLookup.apply("OTEL_RESOURCE_ATTRIBUTES");
         if (envResourceAttrs != null && !envResourceAttrs.trim().isEmpty()) {
             sb.append(',').append(envResourceAttrs.trim());
         }
@@ -151,7 +157,7 @@ public class ChrononServiceLauncher extends Launcher {
         if (!chrononResourceAttrs.trim().isEmpty()) {
             sb.append(',').append(chrononResourceAttrs.trim());
         }
-        String envServiceName = System.getenv("OTEL_SERVICE_NAME");
+        String envServiceName = envLookup.apply("OTEL_SERVICE_NAME");
         if (envServiceName != null && !envServiceName.trim().isEmpty()) {
             sb.append(',').append("service.name=").append(envServiceName.trim());
         }
